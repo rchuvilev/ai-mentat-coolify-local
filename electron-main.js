@@ -56,6 +56,8 @@ let sshTunnelHost = null;
 // resolveDataDir falls back to ~/.hexstack-app/<app>/data when the root is
 // not user-writable (see sdk/utils/data-dir.js).
 const { resolveDataDir } = require('./sdk/utils/data-dir');
+const STATUS = require('./lib/status');
+const DOMAIN = require('./lib/domain');
 const dataDir = resolveDataDir("ai-mentat-coolify-local");
 const logsDir = path.join(dataDir, 'logs');
 const SETTINGS_FILE = path.join(dataDir, 'settings.json');
@@ -446,24 +448,16 @@ function computeStatus() {
   // Only skip the Coolify probes when the VM is *definitively* not running.
   // `vmRunning === null` means we could not tell, and must not be read as
   // "stopped" — that was the original bug.
-  const coolifyInstalled = vmRunning === false ? false : triCoolifyInstalled();
-  const coolifyRunning = coolifyInstalled === false ? false : triCoolifyRunning();
+  const { coolifyInstalled, coolifyRunning } =
+    STATUS.gateCoolifyProbes(vmRunning, triCoolifyInstalled, triCoolifyRunning);
 
   const fresh = { platform: process.platform, limaAvailable, vmExists, vmRunning, coolifyInstalled, coolifyRunning };
 
   // Fill unknowns from the last confirmed reading and flag the result as stale
   // so the UI can show "checking" rather than a false negative.
-  const last = loadSettings().lastKnownStatus || {};
-  let stale = false;
-  for (const k of ['vmExists', 'vmRunning', 'coolifyInstalled', 'coolifyRunning']) {
-    if (fresh[k] === null) {
-      stale = true;
-      fresh[k] = typeof last[k] === 'boolean' ? last[k] : null;
-    }
-  }
-  fresh.stale = stale;
-  if (!stale) rememberStatus(fresh);
-  return fresh;
+  const merged = STATUS.fillFromCache(fresh, loadSettings().lastKnownStatus);
+  if (STATUS.isCacheable(merged)) rememberStatus(merged);
+  return merged;
 }
 
 ipcMain.handle('setup:status', () => computeStatus());
@@ -545,9 +539,7 @@ ipcMain.handle('setup:coolify-credentials', () => {
 // /data/coolify/source/.env inside the VM, keeping a timestamped backup, then
 // restarts the stack so the change takes effect.
 function applyCoolifyDomain(host, sendLog) {
-  const clean = String(host || '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
-  if (!clean) throw new Error('No hostname given');
-  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(clean)) throw new Error(`"${clean}" is not a valid hostname`);
+  const clean = DOMAIN.requireHost(host);
   if (triCoolifyInstalled() !== true) throw new Error('Coolify is not installed yet — run setup first.');
 
   const url = `https://${clean}`;

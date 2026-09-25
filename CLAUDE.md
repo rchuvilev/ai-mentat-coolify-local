@@ -9,8 +9,7 @@ access. No Docker Desktop required.
 ```sh
 npm install
 npm run gui                  # bundle main process with esbuild, then launch
-npm test                     # 27 unit tests, no deps, no Electron, no display
-npm run test:mutation        # 15 mutation checks — every fix must fail when reverted
+npm test                     # 20 unit tests, no deps, no Electron, no display
 ```
 
 ## Architecture
@@ -21,17 +20,30 @@ npm run test:mutation        # 15 mutation checks — every fix must fail when r
 | Preload bridge | `preload.js` | contextIsolation on, explicit allowlist |
 | UI | `app.html` + `app.css` | single page |
 | Terminal backend | `pty-helper.py` | PTY behind the embedded xterm.js |
-| **Pure logic** | **`lib/lima.js`, `lib/failsafe.js`** | **the only unit-testable code** |
+| **Pure logic** | **`lib/status.js`, `lib/domain.js`** | **the only unit-testable code** |
 | Lima fetch | `scripts/download-lima.js` | pulls the bundled limactl |
 | Build | `shared/*.js` | esbuild bundling, auto-update, publish/release |
 
 ### Why `lib/` exists
 
 `electron-main.js` cannot be loaded outside Electron — `require('electron')`
-throws under plain node — and it exports nothing, so Lima resolution, PATH
-construction and VM-status parsing had **zero test coverage**. `lib/` holds
-that logic as pure functions with injected probes (`exists`, `canRun`), so a
-macOS-only path is verifiable on Linux.
+throws under plain node — and it exports nothing, so anything decided inside it
+has **zero test coverage**.
+
+Lima resolution, PATH construction and VM-status parsing used to live in
+`lib/lima.js` and `lib/failsafe.js`; both moved into the SDK
+(`sdk/logic/lima.js`, `sdk/utils/failsafe.js`) and are covered by its suite.
+What stayed behind, and was uncovered until 2026-09-25, is this app's own
+decision logic:
+
+- **`lib/status.js`** — the tri-state merge behind `computeStatus()`. Probe
+  results are true / false / **null**, where null means "could not ask". Every
+  rule here has been wrong at least once, always the same way: null read as
+  "no", so an installed, running Coolify reported as absent.
+- **`lib/domain.js`** — the hostname guard. Whatever survives `requireHost()`
+  is interpolated into `sudo sed` and `sudo tee` inside the VM, so it is a
+  trust boundary, not a tidy-up. It is an allowlist: anything that is not a
+  dotted hostname is rejected rather than escaped.
 
 **Rule: new platform-conditional or parsing logic goes in `lib/` with a test.**
 
