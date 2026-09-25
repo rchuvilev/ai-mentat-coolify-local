@@ -6,22 +6,26 @@
   <title>Coolify Mentat</title>
   <link rel="stylesheet" href="sdk/ui/base.css">
   <link rel="stylesheet" href="app.css">
+  <!-- Before the inline script below, which builds the flow at parse time. -->
+  <script src="sdk/ui/steps.js"></script>
+  <script src="sdk/ui/modal.js"></script>
 </head>
 <body>
 
 <div class="top-bar">
   <span class="top-bar__title">Coolify Mentat</span>
   <div class="top-bar__spacer"></div>
+  <button type="button" class="top-bar__icon" id="icon-log">Log</button>
+  <button type="button" class="top-bar__icon" id="icon-tunnel">Tunnel</button>
+  <button type="button" class="top-bar__icon" id="icon-faq">FAQ</button>
 </div>
 
-<div class="tab-bar">
-  <button class="active" data-tab="coolify">Coolify Localhost</button>
-  <button data-tab="setup">Setup</button>
-  <button data-tab="tunnel">Cloudflare Tunnel</button>
-  <button data-tab="faq">FAQ</button>
-</div>
+<!-- The whole app is one screen. Sequential work lives in the accordion;
+     reference material (FAQ, tunnel, setup log) opens from the header above,
+     because a tab for it would claim it is a step in the flow. -->
+<div id="flow"></div>
 
-<div class="tab-content">
+<div class="tab-content" id="content-source" hidden>
   <!-- Tab 1: Coolify web UI -->
   <div id="tab-coolify" class="panel active">
     <div id="coolify-loading" class="loading-overlay">
@@ -32,7 +36,6 @@
           <div id="coolify-progress" class="progress-bar-fill"></div>
         </div>
         <div id="coolify-loading-detail" class="loading-detail"></div>
-        <button id="coolify-goto-setup" class="btn" hidden>Open Setup</button>
         <div class="loading-detail loading-detail--permanent">The first-time setup (VM + Coolify install) runs from the Setup tab. After that, Coolify launches on <code>http://localhost:8000</code>.</div>
       </div>
     </div>
@@ -48,8 +51,8 @@
         Checking current state… showing the last confirmed status until the VM answers.
       </div>
 
-      <div class="card">
-        <h3><span id="vm-dot" class="status-dot"></span> Step 1 — Lima VM (Docker host)</h3>
+      <div id="card-vm">
+        <span id="vm-dot" class="status-dot" hidden></span>
         <p class="step-desc">On macOS the Coolify stack runs inside a bundled Lima VM (Apple Virtualization.framework). On Linux a local Docker daemon is used directly when Lima is not available.</p>
         <div class="row">
           <button class="btn" id="vm-create-btn" onclick="vmCreate()">Create &amp; Start VM</button>
@@ -59,8 +62,8 @@
         <div id="vm-msg" class="msg"></div>
       </div>
 
-      <div class="card">
-        <h3><span id="coolify-install-dot" class="status-dot"></span> Step 2 — Install Coolify</h3>
+      <div id="card-install">
+        <span id="coolify-install-dot" class="status-dot" hidden></span>
         <p class="step-desc">Runs the official <code>https://cdn.coollabs.io/coolify/install.sh</code> inside the VM. The script installs Docker and bootstraps the Coolify docker-compose stack. This can take several minutes on first run.</p>
         <div class="row">
           <button class="btn" id="coolify-install-btn" onclick="coolifyInstall()">Install Coolify</button>
@@ -68,8 +71,8 @@
         <div id="coolify-install-msg" class="msg"></div>
       </div>
 
-      <div class="card">
-        <h3><span id="coolify-run-dot" class="status-dot"></span> Step 3 — Start / Stop Coolify</h3>
+      <div id="card-start">
+        <span id="coolify-run-dot" class="status-dot" hidden></span>
         <p class="step-desc">Brings the Coolify stack up or down via <code>docker compose</code>. Start once and leave it running — Coolify hosts long-lived applications.</p>
         <div class="row">
           <button class="btn" id="coolify-start-btn" onclick="coolifyStart()">Start Coolify</button>
@@ -238,15 +241,60 @@
 </div>
 
 <script>
-  // ── Tab switching ──
-  document.querySelectorAll('.tab-bar button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-    });
+  // ── The flow ──
+  //
+  // One screen, four steps, one primary button each. The order is real: there
+  // is nothing to install before the VM exists and nothing to start before it
+  // is installed, which is exactly what a tab bar could not say.
+  const flow = HexKit.createSteps(document.getElementById('flow'), {
+    steps: [
+      { id: 'vm',      title: 'Docker host',    hint: 'A small Linux VM to run Coolify in' },
+      { id: 'install', title: 'Install Coolify', hint: 'Runs the official installer inside the VM' },
+      { id: 'start',   title: 'Start Coolify',  hint: 'Brings the stack up and leaves it running' },
+      { id: 'open',    title: 'Open Coolify',   hint: 'Your dashboard, once it is up' },
+    ],
   });
+
+  // The cards are MOVED, not rebuilt: every id, handler and message element in
+  // them keeps working, so the accordion is a change of container only.
+  flow.body('vm').appendChild(document.getElementById('card-vm'));
+  flow.body('install').appendChild(document.getElementById('card-install'));
+  flow.body('start').appendChild(document.getElementById('card-start'));
+  flow.body('open').appendChild(document.getElementById('tab-coolify'));
+  document.getElementById('tab-coolify').classList.add('active');
+
+  // Reference material: moved out of the tab bar and into header-opened
+  // dialogs. openModal takes the node and puts it back on close, so there is
+  // still exactly one copy of this markup.
+  const faqBody    = document.querySelector('#tab-faq .panel-scroll');
+  const tunnelBody = document.querySelector('#tab-tunnel .panel-scroll');
+  const logCard    = document.getElementById('setup-log').closest('.card');
+  document.getElementById('icon-faq').addEventListener('click',
+    () => HexKit.openModal({ title: 'FAQ', content: faqBody }));
+  document.getElementById('icon-tunnel').addEventListener('click',
+    () => { HexKit.openModal({ title: 'Cloudflare Tunnel', content: tunnelBody }); loadTunnelUi(); });
+  document.getElementById('icon-log').addEventListener('click',
+    () => HexKit.openModal({ title: 'Setup log', content: logCard }));
+
+  // Map the probe onto the steps. Flags are tri-state: null means "still
+  // asking", which is 'busy' rather than a step you have failed to do.
+  let lastSignature = '';
+  function applyFlow(st) {
+    if (!st) return;
+    const state = (v) => v === true ? 'done' : v === null ? 'busy' : 'todo';
+    flow.setState('vm', st.vmRunning === true ? 'done' : st.vmRunning === null ? 'busy' : 'todo');
+    flow.setState('install', state(st.coolifyInstalled));
+    flow.setState('start', state(st.coolifyRunning));
+    flow.setState('open', st.coolifyRunning === true ? 'active' : 'todo');
+    flow.setNote('vm', st.vmRunning === true ? 'Running' : st.vmExists ? 'Stopped' : '');
+    flow.setNote('install', st.coolifyInstalled === true ? 'Installed' : '');
+    flow.setNote('start', st.coolifyRunning === true ? 'Running' : '');
+
+    // Only jump the user when the picture actually changed. Re-running resume()
+    // on every poll would yank an open section shut while they were reading it.
+    const sig = [st.vmRunning, st.coolifyInstalled, st.coolifyRunning].join('|');
+    if (sig !== lastSignature) { lastSignature = sig; flow.resume(); }
+  }
 
   // ── Helpers ──
   function setDot(id, color) { const el = document.getElementById(id); if (el) el.className = 'status-dot ' + color; }
@@ -265,17 +313,8 @@
     setProgress(null, 'Coolify is not running yet',
                 'Coolify is not installed or not started yet.');
     const track = document.getElementById('coolify-progress-track');
-    const cta = document.getElementById('coolify-goto-setup');
     if (track) track.hidden = true;
-    if (cta) cta.hidden = false;
   }
-
-  // addEventListener, not an inline onclick: this app already carries 22 of
-  // those and they are what stops a CSP from forbidding inline script.
-  document.getElementById('coolify-goto-setup')
-    ?.addEventListener('click', () => {
-      document.querySelector('.tab-bar button[data-tab="setup"]').click();
-    });
 
   function setProgress(pct, text, detail) {
     const bar = document.getElementById('coolify-progress');
@@ -322,6 +361,7 @@
       if (s.coolifyRunning === true) toggle('coolify-stop-btn', 'coolify-start-btn');
       else if (s.coolifyRunning === false) toggle('coolify-start-btn', 'coolify-stop-btn');
       if (s.coolifyInstalled === true) document.getElementById('coolify-install-btn').textContent = 'Reinstall Coolify';
+      applyFlow(s);
       return s;
     } catch (e) { console.error(e); return null; }
   }
@@ -391,7 +431,7 @@
   }
 
   function openCoolifyUi() {
-    document.querySelector('.tab-bar button[data-tab="coolify"]').click();
+    flow.setState('open', 'active');   // opening the section IS opening the UI
     pollCoolifyReady();
   }
 
@@ -453,6 +493,7 @@
   // otherwise show the "go to Setup" message.
   (async () => {
     const s = await refreshSetup();
+    applyFlow(s);
     if (s?.coolifyRunning) pollCoolifyReady();
     else showIdle();
   })();
