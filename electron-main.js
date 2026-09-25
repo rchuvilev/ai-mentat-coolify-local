@@ -620,9 +620,6 @@ ipcMain.handle('settings:set', (_, patch) => {
   return { success: true, settings: merged };
 });
 
-ipcMain.handle('shell:open-logs-dir', () => shell.openPath(logsDir));
-ipcMain.handle('shell:open-lima-dir', () => shell.openPath(LIMA_DIR));
-
 // ─── IPC: Cloudflare Tunnel ───────────────────────────────────────────────
 //
 // TWO services, which is the case the SDK's ingress LIST exists for: the
@@ -658,7 +655,13 @@ registerPtyIpc(ipcMain, {
 // ─── IPC: Shell ───────────────────────────────────────────────────────────
 
 registerOpenExternal(ipcMain, shell);
+// Both reveal-in-Finder channels live here, on the SDK helper. They used to be
+// registered a second time, ad hoc, up beside settings:* — and ipcMain.handle
+// throws on a duplicate channel, so the app died on load with "Attempted to
+// register a second handler for 'shell:open-logs-dir'" before any window
+// appeared. Leftover from the move to sdk/logic/shell.
 ipcMain.handle('shell:open-logs-dir', openPathHandler(shell, logsDir));
+ipcMain.handle('shell:open-lima-dir', openPathHandler(shell, LIMA_DIR));
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -669,7 +672,12 @@ app.whenReady().then(async () => {
     app.dock.setIcon(path.join(__dirname, 'icon.png'));
   }
   createWindow();
-  setupAutoUpdate(mainWindow);
+  // setupAutoUpdate is NOT called here: createWindow() already passes it as
+  // onReady, which sdk/ui/window.js fires on 'ready-to-show'. Calling it again
+  // ran the updater twice per launch — visible as a doubled
+  // "Skip checkForUpdates" on every start — and wired a second set of
+  // electron-updater listeners. onReady is the better of the two: it waits for
+  // the window instead of racing it.
 
   // If Coolify is already running from a previous session, the iframe will load it
   // directly and the user skips setup. Otherwise the Setup tab guides them.
