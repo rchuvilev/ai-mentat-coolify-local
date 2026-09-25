@@ -28,10 +28,11 @@
       <div class="loading-content">
         <div class="loading-icon">COOLIFY</div>
         <div id="coolify-loading-text">Checking Coolify status...</div>
-        <div class="progress-bar-track">
+        <div class="progress-bar-track" id="coolify-progress-track">
           <div id="coolify-progress" class="progress-bar-fill"></div>
         </div>
         <div id="coolify-loading-detail" class="loading-detail"></div>
+        <button id="coolify-goto-setup" class="btn" hidden>Open Setup</button>
         <div class="loading-detail loading-detail--permanent">The first-time setup (VM + Coolify install) runs from the Setup tab. After that, Coolify launches on <code>http://localhost:8000</code>.</div>
       </div>
     </div>
@@ -255,6 +256,27 @@
     if (a) a.style.display = '';
     if (b) b.style.display = 'none';
   }
+  // Idle is not progress. This screen used to render setProgress(0, ...), so a
+  // user who had never installed Coolify was shown an empty progress track --
+  // which reads as "something is running and is 0% done", not "nothing is
+  // happening yet". Hide the track and offer the action the copy names, so the
+  // next step is one click instead of "find the tab the sentence mentions".
+  function showIdle() {
+    setProgress(null, 'Coolify is not running yet',
+                'Coolify is not installed or not started yet.');
+    const track = document.getElementById('coolify-progress-track');
+    const cta = document.getElementById('coolify-goto-setup');
+    if (track) track.hidden = true;
+    if (cta) cta.hidden = false;
+  }
+
+  // addEventListener, not an inline onclick: this app already carries 22 of
+  // those and they are what stops a CSP from forbidding inline script.
+  document.getElementById('coolify-goto-setup')
+    ?.addEventListener('click', () => {
+      document.querySelector('.tab-bar button[data-tab="setup"]').click();
+    });
+
   function setProgress(pct, text, detail) {
     const bar = document.getElementById('coolify-progress');
     const t = document.getElementById('coolify-loading-text');
@@ -432,7 +454,7 @@
   (async () => {
     const s = await refreshSetup();
     if (s?.coolifyRunning) pollCoolifyReady();
-    else setProgress(0, 'Coolify is not running yet', 'Go to the Setup tab to install and start it.');
+    else showIdle();
   })();
 
   // ── Cloudflare tunnel UI ──
