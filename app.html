@@ -262,6 +262,8 @@
   flow.body('start').appendChild(document.getElementById('card-start'));
   flow.body('open').appendChild(document.getElementById('tab-coolify'));
   document.getElementById('tab-coolify').classList.add('active');
+  // Step 4's body hosts the Coolify dashboard itself — same reason.
+  flow.body('open').classList.add('steps__body--fill');
 
   // Reference material: moved out of the tab bar and into header-opened
   // dialogs. openModal takes the node and puts it back on close, so there is
